@@ -1,0 +1,290 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>智慧机房环境监测与能耗优化平台</title>
+<link rel="stylesheet" href="style.css?v=1.4.1" />
+<script src="vendor/echarts.min.js"></script>
+</head>
+<body>
+<div class="app">
+  <header class="topbar">
+    <div class="brand">
+      <div class="logo">IoT</div>
+      <div>
+        <h1>智慧机房环境监测与能耗优化平台</h1>
+        <p>仿真 / 实际监测双数据源 · 数字孪生热模型 · 预测式主动调控</p>
+      </div>
+    </div>
+    <div class="topbar-right">
+      <div class="source-switch" id="sourceSwitch">
+        <button data-source="sim" class="active">仿真模式</button>
+        <button data-source="real">实际监测</button>
+      </div>
+      <div class="mode-switch" id="modeSwitch">
+        <button data-mode="adaptive">按需最小制冷</button>
+        <button data-mode="predictive" class="active">预测式调控</button>
+        <button data-mode="threshold">阈值控制</button>
+      </div>
+      <div class="conn"><span id="connDot" class="dot"></span><span id="connText">连接中…</span></div>
+      <div class="clock" id="clock">--:--:--</div>
+    </div>
+  </header>
+
+  <div class="demo-bar">
+    <span class="demo-title">演示注入</span>
+    <button class="chip" data-demo="load" data-room="roomA">机房A +4kW 负载</button>
+    <button class="chip" data-demo="load" data-room="roomB">机房B +4kW 负载</button>
+    <button class="chip danger" data-demo="smoke" data-room="roomA">机房A 烟雾报警</button>
+    <button class="chip" data-demo="smoke-off" data-room="roomA">解除烟雾</button>
+    <button class="chip danger" data-demo="water" data-room="roomA">机房A 漏水</button>
+    <button class="chip" data-demo="water-off" data-room="roomA">解除漏水</button>
+    <button class="chip danger" data-demo="door" data-room="roomA">机房A 门禁打开</button>
+    <button class="chip" data-demo="door-off" data-room="roomA">关闭门禁</button>
+    <button class="chip danger" data-demo="ac-fault" data-room="roomA">机房A 空调故障</button>
+    <button class="chip" data-demo="ac-fault-off" data-room="roomA">空调恢复</button>
+    <button class="chip" data-demo="outdoor" data-room="roomA">室外高温 +5°C</button>
+    <button class="chip" data-demo="humidity" data-room="roomA">湿度骤升 +20%</button>
+    <button class="chip" data-demo="voltage" data-room="roomA">电压波动 ±25V</button>
+    <button class="chip" data-demo="fault" data-device="TH-01">断开 TH-01 心跳</button>
+    <button class="chip" data-demo="fault-off" data-device="TH-01">恢复 TH-01</button>
+    <span class="demo-hint">注入后观察曲线、告警与空调自动调节</span>
+  </div>
+
+  <div class="real-banner" id="realBanner" hidden>
+    <b>实际监测模式</b>：仿真器、演示注入、链路仿真与对照实验已停用；设备按
+    <code>iot/&lt;机房&gt;/&lt;设备&gt;/telemetry</code> 上报即可自动登记。局域网设备接入 Broker 需设置
+    <code>IOT_MQTT_BIND=0.0.0.0</code> 后重启。
+  </div>
+
+  <main class="grid">
+    <section class="kpis">
+      <div class="kpi">
+        <div class="kpi-label">机房A 温度</div>
+        <div class="kpi-value"><span id="kpiTempA">--</span><em>°C</em></div>
+        <div class="kpi-foot" id="kpiTempAFoot">阈值 28 / 32 °C</div>
+      </div>
+      <div class="kpi">
+        <div class="kpi-label">机房B 温度</div>
+        <div class="kpi-value"><span id="kpiTempB">--</span><em>°C</em></div>
+        <div class="kpi-foot" id="kpiTempBFoot">阈值 28 / 32 °C</div>
+      </div>
+      <div class="kpi">
+        <div class="kpi-label">机柜总功率</div>
+        <div class="kpi-value"><span id="kpiPower">--</span><em>kW</em></div>
+        <div class="kpi-foot" id="kpiPowerFoot">A + B 实时负载</div>
+      </div>
+      <div class="kpi">
+        <div class="kpi-label">活动告警</div>
+        <div class="kpi-value"><span id="kpiAlarms">0</span><em>条</em></div>
+        <div class="kpi-foot" id="kpiAlarmFoot">严重 0 · 预警 0</div>
+      </div>
+    </section>
+
+    <section class="card onboard-card">
+      <div class="card-head">
+        <h2>接入真实设备</h2>
+        <span class="card-sub" id="onboardSub">填写编号即可生成上报主题，设备上报后自动上线</span>
+      </div>
+      <div class="onboard-form">
+        <label>机房
+          <select id="obRoom">
+            <option value="roomA">机房A · 核心机柜区</option>
+            <option value="roomB">机房B · 配电存储区</option>
+          </select>
+        </label>
+        <label>设备编号
+          <input id="obDevice" placeholder="如 TH-101" maxlength="21" autocomplete="off" />
+        </label>
+        <label>设备名称
+          <input id="obName" placeholder="可选，默认同编号" maxlength="24" autocomplete="off" />
+        </label>
+        <label>设备类型
+          <select id="obType">
+            <option value="">按编号自动识别</option>
+            <option value="env">环境温湿度</option>
+            <option value="power">电力 / PDU</option>
+            <option value="smoke">烟雾</option>
+            <option value="water">漏水检测</option>
+            <option value="door">门禁</option>
+            <option value="ups">UPS 电源</option>
+            <option value="airflow">风速</option>
+            <option value="actuator">空调 / 排风</option>
+          </select>
+        </label>
+        <label>下行网关
+          <select id="obGateway">
+            <option value="mqtt">直连 MQTT</option>
+            <option value="ir">红外网关</option>
+            <option value="modbus">Modbus 网关</option>
+          </select>
+        </label>
+        <button class="chip primary" id="obSubmit">接入并检测</button>
+        <button class="chip" id="obCancel" hidden>取消编辑</button>
+        <span class="ob-msg" id="obMsg"></span>
+      </div>
+      <div class="onboard-result" id="obResult" hidden>
+        <div class="ob-line">
+          <span>上报主题</span>
+          <input class="ob-input" id="obTopic" spellcheck="false" maxlength="128" />
+          <button class="mini" id="obSaveTopic">保存主题</button>
+          <button class="mini" data-copy="obTopic">复制</button>
+        </div>
+        <div class="ob-line">
+          <span>示例报文</span>
+          <textarea class="ob-textarea" id="obPayload" rows="5" spellcheck="false"></textarea>
+          <button class="mini" data-copy="obPayload">复制</button>
+        </div>
+        <p class="ob-hint" id="obHint"></p>
+      </div>
+      <div class="table-wrap">
+        <table class="device-table">
+          <thead>
+            <tr><th>设备</th><th>名称</th><th>机房</th><th>类型</th><th>网关</th><th>已收到指标</th><th>状态</th><th>操作</th></tr>
+          </thead>
+          <tbody id="realDeviceBody">
+            <tr><td colspan="8" class="empty">暂无接入设备</td></tr>
+          </tbody>
+        </table>
+      </div>
+    </section>
+
+    <section class="card experiment-card">
+      <div class="card-head">
+        <h2>受控对照实验</h2>
+        <span class="card-sub">相同负载脚本 · 三种策略 · 环境复位后开始</span>
+      </div>
+      <div class="exp-top">
+        <div class="exp-info">
+          <div class="exp-phase" id="expPhase">未运行</div>
+          <div class="exp-meta" id="expMeta">依次运行「阈值控制 → 按需最小制冷 → 预测式调控」，自动注入相同负载</div>
+          <div class="exp-progress"><div id="expBar"></div></div>
+          <div class="exp-actions">
+            <button class="chip primary" id="expStart">开始对照实验</button>
+            <button class="chip" id="expCancel">取消</button>
+            <a class="chip" id="expCsvRaw" href="/api/experiment/export?kind=raw">导出明细 CSV</a>
+            <a class="chip" id="expCsvSum" href="/api/experiment/export?kind=summary">导出汇总 CSV</a>
+          </div>
+        </div>
+        <table class="exp-table">
+          <thead>
+            <tr><th>模式</th><th>平均功率</th><th>超温占比</th><th>均温</th><th>峰值</th><th>制冷能耗</th></tr>
+          </thead>
+          <tbody id="expRuns">
+            <tr><td colspan="6" class="empty">暂无实验结果</td></tr>
+          </tbody>
+        </table>
+      </div>
+    </section>
+
+    <section class="card link-card">
+      <div class="card-head">
+        <h2>链路质量仿真</h2>
+        <span class="card-sub">QoS 1 · 上行遥测</span>
+      </div>
+      <div class="link-presets">
+        <button class="chip" data-link="normal">正常链路</button>
+        <button class="chip" data-link="loss10">10% 丢包</button>
+        <button class="chip" data-link="delay">300ms 时延</button>
+        <button class="chip" data-link="bad">20%丢包 + 800ms抖动</button>
+        <button class="chip" data-link="offline">断网（缓存重传）</button>
+      </div>
+      <div class="link-stats">
+        <div><label>已发送</label><b id="linkSent">0</b></div>
+        <div><label>已丢失</label><b id="linkDropped">0</b></div>
+        <div><label>缓存待传</label><b id="linkBuffer">0</b></div>
+        <div><label>已重传</label><b id="linkReplay">0</b></div>
+        <div><label>送达率</label><b id="linkRatio">100%</b></div>
+        <div><label>平台接收</label><b id="linkRecv">0</b></div>
+      </div>
+      <div class="link-note" id="linkNote">当前链路正常，无丢包与时延注入</div>
+    </section>
+
+    <section class="card temp-card">
+      <div class="card-head">
+        <h2>温度趋势</h2>
+        <span class="card-sub">红线：预警 28°C / 严重 32°C</span>
+      </div>
+      <div class="chart" id="tempChart"></div>
+    </section>
+
+    <section class="card rooms-card">
+      <div class="card-head"><h2>机房实时状态与控制</h2><span class="card-sub">命令经 MQTT 下发</span></div>
+      <div class="rooms" id="rooms"></div>
+    </section>
+
+    <section class="card power-card">
+      <div class="card-head"><h2>机柜功率趋势</h2><span class="card-sub">注入负载后观察调控响应</span></div>
+      <div class="chart" id="powerChart"></div>
+    </section>
+
+    <section class="card humidity-card">
+      <div class="card-head"><h2>湿度趋势</h2><span class="card-sub">黄线：预警 70%RH</span></div>
+      <div class="chart" id="humidityChart"></div>
+    </section>
+
+    <section class="card pdu-pie-card">
+      <div class="card-head"><h2>各 PDU 功率占比</h2><span class="card-sub">实时负载分布</span></div>
+      <div class="chart small" id="pduPieChart"></div>
+    </section>
+
+    <section class="card device-status-card">
+      <div class="card-head"><h2>设备状态分布</h2><span class="card-sub">在线 / 离线 / 暂停</span></div>
+      <div class="chart small" id="deviceStatusChart"></div>
+    </section>
+
+    <section class="card alarm-card">
+      <div class="card-head">
+        <h2>告警中心</h2>
+        <div class="tabs" id="alarmTabs">
+          <button data-tab="active" class="active">活动</button>
+          <button data-tab="history">历史</button>
+        </div>
+      </div>
+      <ul class="list alarms" id="alarmList"></ul>
+    </section>
+
+    <section class="card compare-card">
+      <div class="card-head"><h2>调控策略对比</h2><span class="card-sub">按运行模式累计统计</span></div>
+      <div class="chart small" id="compareChart"></div>
+      <table class="compare-table">
+        <thead><tr><th>指标</th><th>阈值控制</th><th>按需制冷</th><th>预测式</th></tr></thead>
+        <tbody id="compareBody"></tbody>
+      </table>
+    </section>
+
+    <section class="card action-card">
+      <div class="card-head"><h2>调控动作日志</h2><span class="card-sub">云端决策 → MQTT 命令</span></div>
+      <ul class="list actions" id="actionList"></ul>
+    </section>
+
+    <section class="card device-card">
+      <div class="card-head"><h2>设备台账与在线状态</h2><span class="card-sub" id="deviceLedgerSub">心跳超时 20s 判定离线</span></div>
+      <div class="device-settings">
+        <label>离线判定阈值
+          <input type="number" id="offlineSeconds" min="5" max="86400" step="1" value="20" />
+          <span>秒</span>
+        </label>
+        <button class="mini primary" id="offlineSave">保存</button>
+        <span class="ob-hint" id="offlineHint">真实设备采样 30~60s 时建议设为 90~120s</span>
+      </div>
+      <div class="table-wrap">
+        <table class="device-table">
+          <thead>
+            <tr><th>设备</th><th>名称</th><th>所属机房</th><th>类型</th><th>状态</th><th>最后上报</th></tr>
+          </thead>
+          <tbody id="deviceBody"></tbody>
+        </table>
+      </div>
+    </section>
+  </main>
+
+  <footer class="footer">
+    <span>《物联网基础实践》课程项目 · 仿真 / 实际监测双模式</span>
+    <span>数据链路：虚拟或真实设备 → MQTT Broker → 规则引擎/时序库 → WebSocket → 大屏</span>
+  </footer>
+</div>
+<script src="app.js?v=1.4.1"></script>
+</body>
+</html>

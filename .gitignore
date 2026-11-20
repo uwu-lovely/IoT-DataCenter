@@ -1,0 +1,26 @@
+# Python
+__pycache__/
+*.py[cod]
+.venv/
+venv/
+.pytest_cache/
+.coverage
+htmlcov/
+
+# 运行数据与日志
+*.db
+*.db-wal
+*.db-shm
+*.sqlite3
+*.log
+logs/
+
+# 工具与临时产物
+.screenshots/
+.trae-html-share-packages/
+.DS_Store
+Thumbs.db
+
+# 编辑器
+.vscode/
+.idea/
