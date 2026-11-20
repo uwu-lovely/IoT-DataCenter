@@ -102,6 +102,32 @@ def _device_topic(dev: dict) -> str:
     return dev.get("topic") or _default_topic(dev["room"], dev["device"])
 
 
+def _persist_real_devices() -> None:
+    """把当前真实设备登记写入设置表，供模式切换后恢复。"""
+    db.save_real_devices(db.all_devices())
+
+
+def _restore_real_devices() -> None:
+    """切回实际监测模式时恢复设备编号、名称、类型、主题与网关。"""
+    for row in db.load_real_devices():
+        device = str(row.get("device", "")).strip()
+        room = row.get("room")
+        kind = row.get("type")
+        if not device or room not in ROOMS or kind not in METRICS_BY_TYPE:
+            continue
+        topic = str(row.get("topic") or "")
+        gateway = row.get("gateway")
+        if gateway not in GATEWAY_TYPES:
+            gateway = "mqtt"
+        db.register_device(
+            device, room, kind, str(row.get("name") or device), topic, gateway
+        )
+        rt.known_devices.add(device)
+        if rt.bridge and topic and topic != _default_topic(room, device):
+            rt.bridge.subscribe_topic(topic)
+            rt.topic_map[topic] = (room, device)
+
+
 def _topic_error(topic: str, room: str, device: str) -> str | None:
     """校验自定义上报主题：不允许通配符、空层级、空格或指向其他设备的标准主题。"""
     if not topic:
@@ -236,6 +262,7 @@ async def handle_message(topic: str, payload: dict) -> None:
     if rt.mode == "real" and device not in rt.known_devices:
         db.ensure_device(device, room, _device_type(device))
         rt.known_devices.add(device)
+        _persist_real_devices()
 
     rows = [(ts, room, device, m, float(v)) for m, v in metrics.items()]
     db.insert_telemetry(rows, is_test=0)
@@ -632,6 +659,9 @@ async def set_system_mode(payload: dict):
         rt.exp.task.cancel()
         await asyncio.gather(rt.exp.task, return_exceptions=True)
 
+    # 离开实际监测模式前保存设备登记，避免切回仿真后丢失真实设备配置
+    if rt.mode == "real":
+        _persist_real_devices()
     db.reset_runtime_tables(seed_devices=(mode == "sim"))
     db.set_setting("mode", mode)
     rt.mode = mode
@@ -654,6 +684,9 @@ async def set_system_mode(payload: dict):
         for topic in list(rt.bridge.custom_topics):
             rt.bridge.unsubscribe_topic(topic)
         rt.bridge.drop_buffer()
+    # 切回实际监测时恢复上次登记的真实设备与自定义上报主题
+    if mode == "real":
+        _restore_real_devices()
 
     await rt.broadcast({"type": "system", "mode": mode})
     return {"mode": mode, "system": _system_info()}
@@ -827,6 +860,7 @@ async def register_real_device(payload: dict):
         rt.bridge.subscribe_topic(topic)
         rt.topic_map[topic] = (room, device)
     rt.known_devices.add(device)
+    _persist_real_devices()
     now = time.time()
     info = _real_device_info(db.get_device(device), now)
     action = "update" if existing else "register"
@@ -923,6 +957,7 @@ async def update_real_device_topic(payload: dict):
     rt.topic_map.pop(old, None)
     if topic != standard:
         rt.topic_map[topic] = (dev["room"], device)
+    _persist_real_devices()
     await rt.broadcast({"type": "device", "action": "topic", "device": device})
     return {"ok": True, "topic": topic}
 
@@ -940,6 +975,7 @@ async def update_device_gateway(payload: dict):
     if gateway not in GATEWAY_TYPES:
         return JSONResponse({"error": f"网关类型仅支持 {' / '.join(GATEWAY_TYPES)}"}, status_code=400)
     db.update_device_gateway(device, gateway)
+    _persist_real_devices()
     await rt.broadcast({"type": "device", "action": "gateway", "device": device})
     return {"ok": True, "device": device, "gateway": gateway, "gateway_cn": GATEWAY_CN[gateway]}
 
@@ -962,6 +998,7 @@ async def delete_real_device(device: str):
     rt.device_test_metrics.pop(device, None)
     for key in [k for k in rt.latest_metrics if k[1] == device]:
         rt.latest_metrics.pop(key, None)
+    _persist_real_devices()
     await rt.broadcast({"type": "device", "action": "remove", "device": device})
     return {"ok": True}
 

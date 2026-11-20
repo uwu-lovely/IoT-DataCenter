@@ -1,5 +1,6 @@
 """SQLite 时序存储与查询。单连接 + 锁，满足单机仿真演示规模。"""
 
+import json
 import sqlite3
 import threading
 import time
@@ -137,6 +138,24 @@ def set_setting(key: str, value: str) -> None:
             (key, str(value)),
         )
         _conn.commit()
+
+
+def save_real_devices(devices) -> None:
+    """持久化实际监测设备登记，切换模式或重启后恢复（在线状态不保存）。"""
+    fields = ("device", "room", "type", "name", "topic", "gateway")
+    rows = [{k: str(d.get(k) or "") for k in fields} for d in devices]
+    set_setting("real_devices", json.dumps(rows, ensure_ascii=False))
+
+
+def load_real_devices() -> list[dict]:
+    raw = get_setting("real_devices")
+    if not raw:
+        return []
+    try:
+        rows = json.loads(raw)
+    except (TypeError, ValueError):
+        return []
+    return rows if isinstance(rows, list) else []
 
 
 def ensure_device(device: str, room: str, kind: str = "env", name: str = "", gateway: str = "mqtt") -> None:

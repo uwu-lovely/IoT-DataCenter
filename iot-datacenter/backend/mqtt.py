@@ -96,14 +96,15 @@ def _build_broker_config() -> dict:
             "password_file": _write_password_file()
         }
 
-    # 主题 ACL：平台账号 iot/# 全权限；设备/匿名账号限 telemetry 发布、cmd 订阅
-    publish_acl: dict[str, list[str]] = {PLATFORM_USERNAME: ["iot/#"]}
-    subscribe_acl: dict[str, list[str]] = {PLATFORM_USERNAME: ["iot/#"]}
+    # 主题 ACL：平台账号需要覆盖自定义上报主题，因此放开全部主题；
+    # 设备/匿名账号允许向任意主题发布，以支持自定义主题映射，但仍只能订阅下行 cmd。
+    publish_acl: dict[str, list[str]] = {PLATFORM_USERNAME: ["#"]}
+    subscribe_acl: dict[str, list[str]] = {PLATFORM_USERNAME: ["#"]}
     if not MQTT_ALLOW_ANONYMOUS and MQTT_USERNAME:
-        publish_acl[MQTT_USERNAME] = ["iot/+/+/telemetry"]
+        publish_acl[MQTT_USERNAME] = ["#"]
         subscribe_acl[MQTT_USERNAME] = ["iot/+/+/cmd"]
     else:
-        publish_acl["anonymous"] = ["iot/+/+/telemetry"]
+        publish_acl["anonymous"] = ["#"]
         subscribe_acl["anonymous"] = ["iot/+/+/cmd"]
     plugins["amqtt.plugins.topic_checking.TopicAccessControlListPlugin"] = {
         "publish_acl": publish_acl,
